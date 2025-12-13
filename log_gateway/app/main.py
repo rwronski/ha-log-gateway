@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 from typing import Annotated, Optional
 
 import httpx
@@ -7,6 +8,8 @@ from pydantic import BaseModel, Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings as PydanticBaseSettings
 from starlette.responses import JSONResponse, PlainTextResponse
+import datetime as dt
+import re
 
 
 class Settings(PydanticBaseSettings):
@@ -16,6 +19,7 @@ class Settings(PydanticBaseSettings):
     lines_default: int = Field(1000, alias="LOGGW_LINES_DEFAULT")
     lines_max: int = Field(1000, alias="LOGGW_LINES_MAX")
     no_colors: bool = Field(True, alias="LOGGW_NO_COLORS")
+    config_dir: str = Field("/config", alias="LOGGW_CONFIG_DIR")
 
     model_config = {
         "env_file": None,
@@ -101,6 +105,41 @@ app = FastAPI(
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
 
+_TS_RE = re.compile(
+    r"^(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2})(?:\.(?P<ms>\d{1,6}))?"
+)
+
+
+def _parse_ts(line: str) -> Optional[dt.datetime]:
+    m = _TS_RE.match(line)
+    if not m:
+        return None
+    ms = m.group("ms") or "0"
+    ms = (ms + "000000")[:6]
+    try:
+        return dt.datetime.fromisoformat(f"{m.group('date')}T{m.group('time')}.{ms}")
+    except ValueError:
+        return None
+
+
+def _tail_lines(path: Path, n: int, encoding: str = "utf-8") -> list[str]:
+    if n <= 0:
+        return []
+    with path.open("rb") as f:
+        f.seek(0, 2)
+        end = f.tell()
+        block = 8192
+        data = b""
+        pos = end
+        while pos > 0 and data.count(b"\n") <= n:
+            read_size = block if pos >= block else pos
+            pos -= read_size
+            f.seek(pos)
+            data = f.read(read_size) + data
+        text = data.decode(encoding, errors="replace")
+    lines = text.splitlines()
+    return lines[-n:]
+
 
 def fetch_logs(path: str, settings: Settings) -> str:
     params = {"lines": settings.lines_default}
@@ -152,8 +191,43 @@ def get_core_logs(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    content = fetch_logs("/core/logs", settings)
-    return PlainTextResponse(content)
+    # Merge best-effort from:
+    # - Supervisor container logs: /core/logs
+    # - File logs: /config/home-assistant.log (+ rotations if needed)
+    entries: list[tuple[Optional[dt.datetime], int, str]] = []
+    order = 0
+
+    container_text = fetch_logs("/core/logs", settings)
+    for line in container_text.splitlines():
+        entries.append((_parse_ts(line), order, line))
+        order += 1
+
+    requested = settings.lines_default
+    cfg = Path(settings.config_dir)
+    remaining = requested
+    file_lines: list[str] = []
+    for candidate in [cfg / "home-assistant.log", cfg / "home-assistant.log.1", cfg / "home-assistant.log.2"]:
+        if remaining <= 0:
+            break
+        try:
+            if candidate.exists():
+                chunk = _tail_lines(candidate, remaining)
+                if chunk:
+                    file_lines = chunk + file_lines
+                    remaining = max(0, requested - len(file_lines))
+        except OSError:
+            continue
+
+    for line in file_lines:
+        entries.append((_parse_ts(line), order, line))
+        order += 1
+
+    with_ts = [e for e in entries if e[0] is not None]
+    no_ts = [e for e in entries if e[0] is None]
+    with_ts.sort(key=lambda x: (x[0], x[1]))  # type: ignore[call-arg]
+    merged = with_ts + no_ts
+    tail = merged[-settings.lines_default :] if len(merged) > settings.lines_default else merged
+    return PlainTextResponse("\n".join([x[2] for x in tail]))
 
 @app.get(
     "/logs/supervisor",

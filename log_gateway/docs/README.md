@@ -6,7 +6,7 @@
 - Endpoints:
   - `GET /healthz`
   - `GET /logs/system` (Supervisor `/host/logs`)
-  - `GET /logs/core` (Supervisor `/core/logs`)
+  - `GET /logs/core` (merged: `/core/logs` + `/config/home-assistant.log*`)
   - `GET /logs/supervisor` (Supervisor `/supervisor/logs`)
   - `GET /logs/z2m` (Supervisor `/addons/<z2m_slug>/logs`, domyślnie `45df7312_zigbee2mqtt`)
 
