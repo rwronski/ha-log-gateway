@@ -1,4 +1,4 @@
-#!/command/with-contenv bash
+#!/usr/bin/with-contenv bash
 set -euo pipefail
 
 OPTIONS_FILE="/data/options.json"
@@ -21,4 +21,4 @@ export LOGGW_LINES_MAX="${LINES_MAX}"
 export LOGGW_NO_COLORS="${NO_COLORS}"
 
 echo "Starting log gateway on 0.0.0.0:8099 (snapshot only)."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8099 --proxy-headers
+exec uvicorn main:app --app-dir /app/app --host 0.0.0.0 --port 8099 --proxy-headers

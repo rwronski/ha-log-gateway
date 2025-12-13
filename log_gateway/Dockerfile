@@ -25,10 +25,8 @@ COPY requirements.txt /tmp/requirements.txt
 RUN /venv/bin/pip install --no-cache-dir -r /tmp/requirements.txt
 
 COPY app /app
-COPY run.sh /run.sh
+COPY rootfs /
 
-RUN chmod a+x /run.sh
+RUN chmod a+x /etc/services.d/log_gateway/run
 
 ENV PATH="/venv/bin:${PATH}"
-
-CMD ["/run.sh"]

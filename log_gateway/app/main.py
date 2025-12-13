@@ -4,8 +4,8 @@ from typing import Annotated, Optional
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
 from pydantic import BaseModel, Field
-from pydantic import BaseSettings as PydanticBaseSettings
 from pydantic import field_validator
+from pydantic_settings import BaseSettings as PydanticBaseSettings
 from starlette.responses import JSONResponse, PlainTextResponse
 
 
