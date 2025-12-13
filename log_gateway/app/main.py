@@ -72,7 +72,7 @@ class LogSnapshotResponse(BaseModel):
 
 
 def require_bearer_auth(
-    authorization: Annotated[Optional[str], Header(None)],
+    authorization: Annotated[Optional[str], Header()] = None,
     settings: Settings = Depends(get_settings),
 ) -> str:
     if not authorization or not authorization.lower().startswith("bearer "):
