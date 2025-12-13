@@ -140,6 +140,21 @@ def get_system_logs(
     content = fetch_logs("/host/logs", settings)
     return PlainTextResponse(content)
 
+@app.get(
+    "/logs/core",
+    response_class=PlainTextResponse,
+    responses={
+        200: {"content": {"text/plain": {"example": "log lines..."}}},
+        502: {"description": "Upstream error"},
+    },
+)
+def get_core_logs(
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    content = fetch_logs("/core/logs", settings)
+    return PlainTextResponse(content)
+
 
 @app.get(
     "/logs/z2m",
