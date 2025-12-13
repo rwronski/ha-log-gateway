@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/with-contenv bash
 set -euo pipefail
 
 OPTIONS_FILE="/data/options.json"
