@@ -7,13 +7,11 @@ ENV \
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Install runtime dependencies and bashio for config handling
+# Install runtime dependencies (no bashio; options parsed via jq)
 RUN \
   apk add --no-cache \
     bash \
-    bashio \
     ca-certificates \
-    curl \
     jq \
     python3 \
     py3-pip \
