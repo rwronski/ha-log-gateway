@@ -1,6 +1,6 @@
 {
   "name": "Log Gateway",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "slug": "log_gateway",
   "description": "Read-only gateway for Supervisor logs (snapshot, no stream).",
   "arch": ["aarch64", "amd64", "armv7", "armhf", "i386"],
@@ -21,6 +21,7 @@
   "options": {
     "api_token": "change-me",
     "z2m_slug": "45df7312_zigbee2mqtt",
+    "z2m_fetch_cap": 20000,
     "lines_default": 1000,
     "lines_max": 1000,
     "no_colors": true
@@ -28,6 +29,7 @@
   "schema": {
     "api_token": "str",
     "z2m_slug": "str",
+    "z2m_fetch_cap": "int",
     "lines_default": "int",
     "lines_max": "int",
     "no_colors": "bool"

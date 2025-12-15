@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException, Response, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings as PydanticBaseSettings
@@ -16,6 +16,7 @@ class Settings(PydanticBaseSettings):
     token: str = Field(..., alias="LOGGW_TOKEN")
     supervisor_token: str = Field(..., alias="SUPERVISOR_TOKEN")
     z2m_slug: str = Field("45df7312_zigbee2mqtt", alias="LOGGW_Z2M_SLUG")
+    z2m_fetch_cap: int = Field(20000, alias="LOGGW_Z2M_FETCH_CAP")
     lines_default: int = Field(1000, alias="LOGGW_LINES_DEFAULT")
     lines_max: int = Field(1000, alias="LOGGW_LINES_MAX")
     no_colors: bool = Field(True, alias="LOGGW_NO_COLORS")
@@ -36,6 +37,12 @@ class Settings(PydanticBaseSettings):
     def _positive(cls, v: int) -> int:
         if v <= 0:
             raise ValueError("must be positive")
+        return v
+
+    @field_validator("z2m_fetch_cap")
+    def _cap_min(cls, v: int) -> int:
+        if v < 1000:
+            raise ValueError("z2m_fetch_cap must be >= 1000")
         return v
 
     @field_validator("lines_max")
@@ -109,6 +116,8 @@ _TS_RE = re.compile(
     r"^(?P<date>\d{4}-\d{2}-\d{2})[ T](?P<time>\d{2}:\d{2}:\d{2})(?:\.(?P<ms>\d{1,6}))?"
 )
 
+_Z2M_DEBUG_RE = re.compile(r"^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]\s+debug:")
+
 
 def _parse_ts(line: str) -> Optional[dt.datetime]:
     m = _TS_RE.match(line)
@@ -141,8 +150,8 @@ def _tail_lines(path: Path, n: int, encoding: str = "utf-8") -> list[str]:
     return lines[-n:]
 
 
-def fetch_logs(path: str, settings: Settings) -> str:
-    params = {"lines": settings.lines_default}
+def fetch_logs(path: str, settings: Settings, *, lines: Optional[int] = None) -> str:
+    params = {"lines": int(lines if lines is not None else settings.lines_default)}
     if settings.no_colors:
         params["no_colors"] = 1
 
@@ -162,6 +171,12 @@ def fetch_logs(path: str, settings: Settings) -> str:
         )
 
     return response.text
+
+
+def _drop_z2m_debug_lines(text: str) -> str:
+    lines = text.splitlines()
+    filtered = [line for line in lines if not _Z2M_DEBUG_RE.match(line)]
+    return "\n".join(filtered)
 
 
 @app.get(
@@ -256,7 +271,41 @@ def get_supervisor_logs(
 def get_z2m_logs(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
+    include_debug: bool = Query(False, description="Include debug lines"),
 ) -> Response:
     path = f"/addons/{settings.z2m_slug}/logs"
-    content = fetch_logs(path, settings)
-    return PlainTextResponse(content)
+    target = settings.lines_default
+
+    if include_debug:
+        content = fetch_logs(path, settings, lines=target)
+        lines = content.splitlines()
+        return PlainTextResponse("\n".join(lines[-target:]) if len(lines) > target else content)
+
+    # Best-effort: return exactly `target` non-debug lines by over-fetching and filtering.
+    # Falls back to returning `target` raw lines if there aren't enough non-debug lines.
+    fetch_n = max(5000, target * 5)
+    cap = max(fetch_n, settings.z2m_fetch_cap)
+
+    warning: Optional[str] = None
+    while True:
+        content = fetch_logs(path, settings, lines=min(fetch_n, cap))
+        raw_lines = content.splitlines()
+        filtered_lines = [line for line in raw_lines if not _Z2M_DEBUG_RE.match(line)]
+
+        if len(filtered_lines) >= target:
+            return PlainTextResponse("\n".join(filtered_lines[-target:]))
+
+        if fetch_n >= cap:
+            if len(raw_lines) >= target:
+                warning = "Insufficient non-debug lines; returning mixed lines to satisfy target count."
+                return PlainTextResponse(
+                    "\n".join(raw_lines[-target:]),
+                    headers={"X-LogGateway-Warning": warning},
+                )
+            warning = "Insufficient lines available to satisfy target count."
+            return PlainTextResponse(
+                "\n".join(filtered_lines),
+                headers={"X-LogGateway-Warning": warning},
+            )
+
+        fetch_n = min(cap, fetch_n * 2)

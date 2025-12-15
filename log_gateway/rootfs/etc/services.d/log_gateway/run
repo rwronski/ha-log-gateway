@@ -5,6 +5,7 @@ OPTIONS_FILE="/data/options.json"
 
 API_TOKEN="$(jq -r '.api_token // empty' "${OPTIONS_FILE}")"
 Z2M_SLUG="$(jq -r '.z2m_slug // "45df7312_zigbee2mqtt"' "${OPTIONS_FILE}")"
+Z2M_FETCH_CAP="$(jq -r '.z2m_fetch_cap // 20000' "${OPTIONS_FILE}")"
 LINES_DEFAULT="$(jq -r '.lines_default // 1000' "${OPTIONS_FILE}")"
 LINES_MAX="$(jq -r '.lines_max // 1000' "${OPTIONS_FILE}")"
 NO_COLORS="$(jq -r '.no_colors // true' "${OPTIONS_FILE}")"
@@ -16,6 +17,7 @@ fi
 
 export LOGGW_TOKEN="${API_TOKEN}"
 export LOGGW_Z2M_SLUG="${Z2M_SLUG}"
+export LOGGW_Z2M_FETCH_CAP="${Z2M_FETCH_CAP}"
 export LOGGW_LINES_DEFAULT="${LINES_DEFAULT}"
 export LOGGW_LINES_MAX="${LINES_MAX}"
 export LOGGW_NO_COLORS="${NO_COLORS}"
