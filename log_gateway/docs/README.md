@@ -7,6 +7,8 @@
   - `GET /healthz`
   - `GET /files/z2m` (lista dozwolonych plików konfiguracyjnych Z2M)
   - `GET /files/z2m/<name>` (np. `configuration.yaml`, `devices.yaml`, `groups.yaml`, `coordinator_backup.json`)
+  - `GET /files/z2m/external_converters` (lista `*.js`)
+  - `GET /files/z2m/external_converters/<name>` (np. `esp-air-sensor.js`)
   - `GET /logs/system` (Supervisor `/host/logs`)
   - `GET /logs/core` (merged: `/core/logs` + `/config/home-assistant.log*`)
   - `GET /logs/supervisor` (Supervisor `/supervisor/logs`)

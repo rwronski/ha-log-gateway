@@ -252,6 +252,72 @@ def get_z2m_file(
     return PlainTextResponse(content, headers=headers)
 
 
+_Z2M_JS_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.js$")
+
+
+def _z2m_external_converters_dirs(settings: Settings) -> list[Path]:
+    cfg = Path(settings.config_dir) / "zigbee2mqtt" / "external_converters"
+    addon_cfg = _z2m_config_dir(settings) / "external_converters"
+    return [cfg, addon_cfg]
+
+
+@app.get("/files/z2m/external_converters", response_class=JSONResponse)
+def list_z2m_external_converters(
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    results = []
+    for base in _z2m_external_converters_dirs(settings):
+        try:
+            if not base.exists() or not base.is_dir():
+                continue
+            files = []
+            for p in sorted(base.glob("*.js")):
+                try:
+                    if not p.is_file():
+                        continue
+                    stat = p.stat()
+                    files.append(
+                        {
+                            "name": p.name,
+                            "size": stat.st_size,
+                            "mtime": int(stat.st_mtime),
+                        }
+                    )
+                except OSError:
+                    continue
+            results.append({"base": str(base), "files": files})
+        except OSError:
+            continue
+    return JSONResponse({"locations": results})
+
+
+@app.get("/files/z2m/external_converters/{name}", response_class=PlainTextResponse)
+def get_z2m_external_converter(
+    name: str,
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not _Z2M_JS_NAME_RE.match(name):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not allowed.")
+
+    for base in _z2m_external_converters_dirs(settings):
+        path = base / name
+        try:
+            if not path.exists() or not path.is_file():
+                continue
+            content, truncated = _read_text_file(path, max_bytes=2_000_000)
+            headers = {"Content-Type": "application/javascript; charset=utf-8"}
+            if truncated:
+                headers["X-LogGateway-Truncated"] = "true"
+            headers["X-LogGateway-Path"] = str(path)
+            return PlainTextResponse(content, headers=headers)
+        except OSError:
+            continue
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
+
+
 @app.get(
     "/logs/system",
     response_class=PlainTextResponse,
