@@ -8,7 +8,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, st
 from pydantic import BaseModel, Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings as PydanticBaseSettings
-from starlette.responses import JSONResponse, PlainTextResponse
+from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 import re
 
 
@@ -204,6 +204,8 @@ _Z2M_ALLOWED_FILES: dict[str, str] = {
     "groups.yaml": "text/yaml; charset=utf-8",
     "groups.yml": "text/yaml; charset=utf-8",
     "coordinator_backup.json": "application/json; charset=utf-8",
+    # Zigbee2MQTT uses JSON text format despite ".db" extension.
+    "database.db": "application/json; charset=utf-8",
 }
 
 
@@ -247,6 +249,7 @@ def get_z2m_file(
     name: str,
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
+    download: bool = Query(False, description="Download as attachment (no truncation header)."),
 ) -> Response:
     # Avoid route shadowing: /files/z2m/{name} is registered before the static
     # /files/z2m/external_converters route in this file, so handle it here.
@@ -268,15 +271,23 @@ def get_z2m_file(
     if found_path is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
 
+    headers = {"Content-Type": _Z2M_ALLOWED_FILES[name]}
+    headers["X-LogGateway-Path"] = str(found_path)
+    content_type = _Z2M_ALLOWED_FILES[name]
+    if download:
+        return FileResponse(
+            path=str(found_path),
+            media_type=content_type,
+            filename=found_path.name,
+            headers={"X-LogGateway-Path": str(found_path)},
+        )
+
     try:
         content, truncated = _read_text_file(found_path, max_bytes=2_000_000)
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
-
-    headers = {"Content-Type": _Z2M_ALLOWED_FILES[name]}
     if truncated:
         headers["X-LogGateway-Truncated"] = "true"
-    headers["X-LogGateway-Path"] = str(found_path)
     return PlainTextResponse(content, headers=headers)
 
 

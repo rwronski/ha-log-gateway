@@ -7,7 +7,8 @@
   - `GET /healthz`
   - `GET /files/z2m` (lista dozwolonych plików konfiguracyjnych Z2M)
     - (działa też `GET /files/z2m/`)
-  - `GET /files/z2m/<name>` (np. `configuration.yaml`, `devices.yaml`, `groups.yaml`, `coordinator_backup.json`)
+  - `GET /files/z2m/<name>` (np. `configuration.yaml`, `devices.yaml`, `groups.yaml`, `coordinator_backup.json`, `database.db`)
+    - Dodaj `?download=true` aby pobrać jako załącznik.
   - `GET /files/z2m/external_converters` (lista `*.js`)
     - (działa też `GET /files/z2m/external_converters/`)
   - `GET /files/z2m/external_converters/<name>` (np. `esp-air-sensor.js`)
