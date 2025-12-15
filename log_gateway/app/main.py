@@ -2,13 +2,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Optional
 
+import datetime as dt
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings as PydanticBaseSettings
 from starlette.responses import JSONResponse, PlainTextResponse
-import datetime as dt
 import re
 
 
@@ -21,6 +21,7 @@ class Settings(PydanticBaseSettings):
     lines_max: int = Field(1000, alias="LOGGW_LINES_MAX")
     no_colors: bool = Field(True, alias="LOGGW_NO_COLORS")
     config_dir: str = Field("/config", alias="LOGGW_CONFIG_DIR")
+    all_addon_configs_dir: str = Field("/all_addon_configs", alias="LOGGW_ALL_ADDON_CONFIGS_DIR")
 
     model_config = {
         "env_file": None,
@@ -177,6 +178,78 @@ def _drop_z2m_debug_lines(text: str) -> str:
     lines = text.splitlines()
     filtered = [line for line in lines if not _Z2M_DEBUG_RE.match(line)]
     return "\n".join(filtered)
+
+
+def _read_text_file(path: Path, *, max_bytes: int) -> tuple[str, bool]:
+    data = path.read_bytes()
+    if len(data) <= max_bytes:
+        return data.decode("utf-8", errors="replace"), False
+    return data[:max_bytes].decode("utf-8", errors="replace"), True
+
+
+def _z2m_config_dir(settings: Settings) -> Path:
+    return Path(settings.all_addon_configs_dir) / settings.z2m_slug
+
+
+_Z2M_ALLOWED_FILES: dict[str, str] = {
+    "configuration.yaml": "text/yaml; charset=utf-8",
+    "configuration.yml": "text/yaml; charset=utf-8",
+    "devices.yaml": "text/yaml; charset=utf-8",
+    "devices.yml": "text/yaml; charset=utf-8",
+    "groups.yaml": "text/yaml; charset=utf-8",
+    "groups.yml": "text/yaml; charset=utf-8",
+    "coordinator_backup.json": "application/json; charset=utf-8",
+}
+
+
+@app.get("/files/z2m", response_class=JSONResponse)
+def list_z2m_files(
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    base = _z2m_config_dir(settings)
+    items = []
+    for name, content_type in _Z2M_ALLOWED_FILES.items():
+        p = base / name
+        try:
+            if p.exists() and p.is_file():
+                stat = p.stat()
+                items.append(
+                    {
+                        "name": name,
+                        "size": stat.st_size,
+                        "content_type": content_type,
+                        "mtime": int(stat.st_mtime),
+                    }
+                )
+        except OSError:
+            continue
+    return JSONResponse({"base": str(base), "files": items})
+
+
+@app.get("/files/z2m/{name}", response_class=PlainTextResponse)
+def get_z2m_file(
+    name: str,
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if name not in _Z2M_ALLOWED_FILES:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not allowed.")
+
+    path = _z2m_config_dir(settings) / name
+    try:
+        if not path.exists() or not path.is_file():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
+        content, truncated = _read_text_file(path, max_bytes=2_000_000)
+    except HTTPException:
+        raise
+    except OSError as exc:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    headers = {"Content-Type": _Z2M_ALLOWED_FILES[name]}
+    if truncated:
+        headers["X-LogGateway-Truncated"] = "true"
+    return PlainTextResponse(content, headers=headers)
 
 
 @app.get(

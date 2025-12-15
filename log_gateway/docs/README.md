@@ -5,6 +5,8 @@
 - Snapshot only (no follow). Default/max lines: 1000.
 - Endpoints:
   - `GET /healthz`
+  - `GET /files/z2m` (lista dozwolonych plików konfiguracyjnych Z2M)
+  - `GET /files/z2m/<name>` (np. `configuration.yaml`, `devices.yaml`, `groups.yaml`, `coordinator_backup.json`)
   - `GET /logs/system` (Supervisor `/host/logs`)
   - `GET /logs/core` (merged: `/core/logs` + `/config/home-assistant.log*`)
   - `GET /logs/supervisor` (Supervisor `/supervisor/logs`)
