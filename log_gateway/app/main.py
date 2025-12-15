@@ -187,8 +187,13 @@ def _read_text_file(path: Path, *, max_bytes: int) -> tuple[str, bool]:
     return data[:max_bytes].decode("utf-8", errors="replace"), True
 
 
-def _z2m_config_dir(settings: Settings) -> Path:
-    return Path(settings.all_addon_configs_dir) / settings.z2m_slug
+def _z2m_config_dirs(settings: Settings) -> list[Path]:
+    # Zigbee2MQTT add-on commonly stores its config under /config/zigbee2mqtt on HA OS.
+    # Some variants may also use addon config directory; support both.
+    return [
+        Path(settings.config_dir) / "zigbee2mqtt",
+        Path(settings.all_addon_configs_dir) / settings.z2m_slug,
+    ]
 
 
 _Z2M_ALLOWED_FILES: dict[str, str] = {
@@ -207,24 +212,34 @@ def list_z2m_files(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
 ) -> Response:
-    base = _z2m_config_dir(settings)
-    items = []
-    for name, content_type in _Z2M_ALLOWED_FILES.items():
-        p = base / name
-        try:
-            if p.exists() and p.is_file():
-                stat = p.stat()
-                items.append(
-                    {
-                        "name": name,
-                        "size": stat.st_size,
-                        "content_type": content_type,
-                        "mtime": int(stat.st_mtime),
-                    }
-                )
-        except OSError:
-            continue
-    return JSONResponse({"base": str(base), "files": items})
+    locations = []
+    for base in _z2m_config_dirs(settings):
+        items = []
+        for name, content_type in _Z2M_ALLOWED_FILES.items():
+            p = base / name
+            try:
+                if p.exists() and p.is_file():
+                    stat = p.stat()
+                    items.append(
+                        {
+                            "name": name,
+                            "size": stat.st_size,
+                            "content_type": content_type,
+                            "mtime": int(stat.st_mtime),
+                        }
+                    )
+            except OSError:
+                continue
+        if items:
+            locations.append({"base": str(base), "files": items})
+    return JSONResponse({"locations": locations})
+
+@app.get("/files/z2m/", response_class=JSONResponse, include_in_schema=False)
+def list_z2m_files_slash(
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return list_z2m_files(_, settings)
 
 
 @app.get("/files/z2m/{name}", response_class=PlainTextResponse)
@@ -233,22 +248,35 @@ def get_z2m_file(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
 ) -> Response:
+    # Avoid route shadowing: /files/z2m/{name} is registered before the static
+    # /files/z2m/external_converters route in this file, so handle it here.
+    if name == "external_converters":
+        return list_z2m_external_converters(_, settings)
+
     if name not in _Z2M_ALLOWED_FILES:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not allowed.")
 
-    path = _z2m_config_dir(settings) / name
+    found_path: Optional[Path] = None
+    for base in _z2m_config_dirs(settings):
+        candidate = base / name
+        try:
+            if candidate.exists() and candidate.is_file():
+                found_path = candidate
+                break
+        except OSError:
+            continue
+    if found_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
+
     try:
-        if not path.exists() or not path.is_file():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found.")
-        content, truncated = _read_text_file(path, max_bytes=2_000_000)
-    except HTTPException:
-        raise
+        content, truncated = _read_text_file(found_path, max_bytes=2_000_000)
     except OSError as exc:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
 
     headers = {"Content-Type": _Z2M_ALLOWED_FILES[name]}
     if truncated:
         headers["X-LogGateway-Truncated"] = "true"
+    headers["X-LogGateway-Path"] = str(found_path)
     return PlainTextResponse(content, headers=headers)
 
 
@@ -256,9 +284,7 @@ _Z2M_JS_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+\.js$")
 
 
 def _z2m_external_converters_dirs(settings: Settings) -> list[Path]:
-    cfg = Path(settings.config_dir) / "zigbee2mqtt" / "external_converters"
-    addon_cfg = _z2m_config_dir(settings) / "external_converters"
-    return [cfg, addon_cfg]
+    return [base / "external_converters" for base in _z2m_config_dirs(settings)]
 
 
 @app.get("/files/z2m/external_converters", response_class=JSONResponse)
@@ -290,6 +316,13 @@ def list_z2m_external_converters(
         except OSError:
             continue
     return JSONResponse({"locations": results})
+
+@app.get("/files/z2m/external_converters/", response_class=JSONResponse, include_in_schema=False)
+def list_z2m_external_converters_slash(
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    return list_z2m_external_converters(_, settings)
 
 
 @app.get("/files/z2m/external_converters/{name}", response_class=PlainTextResponse)
