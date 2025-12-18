@@ -101,9 +101,21 @@ def require_bearer_auth(
     return provided
 
 
+def get_requested_lines(lines: Optional[int], settings: Settings) -> int:
+    requested = settings.lines_default if lines is None else int(lines)
+    if requested <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="lines must be positive.")
+    if requested > settings.lines_max:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"lines must be <= {settings.lines_max}.",
+        )
+    return requested
+
+
 app = FastAPI(
     title="Log Gateway",
-    version="0.1.0",
+    version="0.1.17",
     docs_url=None,
     redoc_url=None,
 )
@@ -373,8 +385,10 @@ def get_z2m_external_converter(
 def get_system_logs(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
+    lines: Optional[int] = Query(None, ge=1, description="Number of lines (must be <= lines_max)"),
 ) -> Response:
-    content = fetch_logs("/host/logs", settings)
+    requested = get_requested_lines(lines, settings)
+    content = fetch_logs("/host/logs", settings, lines=requested)
     return PlainTextResponse(content)
 
 @app.get(
@@ -388,19 +402,20 @@ def get_system_logs(
 def get_core_logs(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
+    lines: Optional[int] = Query(None, ge=1, description="Number of lines (must be <= lines_max)"),
 ) -> Response:
     # Merge best-effort from:
     # - Supervisor container logs: /core/logs
     # - File logs: /config/home-assistant.log (+ rotations if needed)
+    requested = get_requested_lines(lines, settings)
     entries: list[tuple[Optional[dt.datetime], int, str]] = []
     order = 0
 
-    container_text = fetch_logs("/core/logs", settings)
+    container_text = fetch_logs("/core/logs", settings, lines=requested)
     for line in container_text.splitlines():
         entries.append((_parse_ts(line), order, line))
         order += 1
 
-    requested = settings.lines_default
     cfg = Path(settings.config_dir)
     remaining = requested
     file_lines: list[str] = []
@@ -424,7 +439,7 @@ def get_core_logs(
     no_ts = [e for e in entries if e[0] is None]
     with_ts.sort(key=lambda x: (x[0], x[1]))  # type: ignore[call-arg]
     merged = with_ts + no_ts
-    tail = merged[-settings.lines_default :] if len(merged) > settings.lines_default else merged
+    tail = merged[-requested:] if len(merged) > requested else merged
     return PlainTextResponse("\n".join([x[2] for x in tail]))
 
 @app.get(
@@ -438,8 +453,10 @@ def get_core_logs(
 def get_supervisor_logs(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
+    lines: Optional[int] = Query(None, ge=1, description="Number of lines (must be <= lines_max)"),
 ) -> Response:
-    content = fetch_logs("/supervisor/logs", settings)
+    requested = get_requested_lines(lines, settings)
+    content = fetch_logs("/supervisor/logs", settings, lines=requested)
     return PlainTextResponse(content)
 
 
@@ -454,10 +471,11 @@ def get_supervisor_logs(
 def get_z2m_logs(
     _: str = Depends(require_bearer_auth),
     settings: Settings = Depends(get_settings),
+    lines: Optional[int] = Query(None, ge=1, description="Number of lines (must be <= lines_max)"),
     include_debug: bool = Query(False, description="Include debug lines"),
 ) -> Response:
     path = f"/addons/{settings.z2m_slug}/logs"
-    target = settings.lines_default
+    target = get_requested_lines(lines, settings)
 
     if include_debug:
         content = fetch_logs(path, settings, lines=target)
