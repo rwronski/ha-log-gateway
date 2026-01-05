@@ -16,9 +16,10 @@ class Settings(PydanticBaseSettings):
     token: str = Field(..., alias="LOGGW_TOKEN")
     supervisor_token: str = Field(..., alias="SUPERVISOR_TOKEN")
     z2m_slug: str = Field("45df7312_zigbee2mqtt", alias="LOGGW_Z2M_SLUG")
+    mosquitto_slug: str = Field("core_mosquitto", alias="LOGGW_MOSQUITTO_SLUG")
     z2m_fetch_cap: int = Field(20000, alias="LOGGW_Z2M_FETCH_CAP")
     lines_default: int = Field(1000, alias="LOGGW_LINES_DEFAULT")
-    lines_max: int = Field(1000, alias="LOGGW_LINES_MAX")
+    lines_max: int = Field(20000, alias="LOGGW_LINES_MAX")
     no_colors: bool = Field(True, alias="LOGGW_NO_COLORS")
     config_dir: str = Field("/config", alias="LOGGW_CONFIG_DIR")
     all_addon_configs_dir: str = Field("/all_addon_configs", alias="LOGGW_ALL_ADDON_CONFIGS_DIR")
@@ -28,10 +29,10 @@ class Settings(PydanticBaseSettings):
         "extra": "ignore",
     }
 
-    @field_validator("z2m_slug")
-    def _slug_non_empty(cls, v: str) -> str:
+    @field_validator("z2m_slug", "mosquitto_slug")
+    def _slug_non_empty(cls, v: str, info) -> str:
         if not v.strip():
-            raise ValueError("z2m_slug cannot be empty")
+            raise ValueError(f"{info.field_name} cannot be empty")
         return v
 
     @field_validator("lines_default", "lines_max")
@@ -115,7 +116,7 @@ def get_requested_lines(lines: Optional[int], settings: Settings) -> int:
 
 app = FastAPI(
     title="Log Gateway",
-    version="0.1.17",
+    version="0.1.18",
     docs_url=None,
     redoc_url=None,
 )
@@ -457,6 +458,25 @@ def get_supervisor_logs(
 ) -> Response:
     requested = get_requested_lines(lines, settings)
     content = fetch_logs("/supervisor/logs", settings, lines=requested)
+    return PlainTextResponse(content)
+
+
+@app.get(
+    "/logs/mqtt",
+    response_class=PlainTextResponse,
+    responses={
+        200: {"content": {"text/plain": {"example": "log lines..."}}},
+        502: {"description": "Upstream error"},
+    },
+)
+def get_mqtt_logs(
+    _: str = Depends(require_bearer_auth),
+    settings: Settings = Depends(get_settings),
+    lines: Optional[int] = Query(None, ge=1, description="Number of lines (must be <= lines_max)"),
+) -> Response:
+    path = f"/addons/{settings.mosquitto_slug}/logs"
+    requested = get_requested_lines(lines, settings)
+    content = fetch_logs(path, settings, lines=requested)
     return PlainTextResponse(content)
 
 

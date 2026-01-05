@@ -15,6 +15,7 @@
   - `GET /logs/system` (Supervisor `/host/logs`) (+ `?lines=...`)
   - `GET /logs/core` (merged: `/core/logs` + `/config/home-assistant.log*`) (+ `?lines=...`)
   - `GET /logs/supervisor` (Supervisor `/supervisor/logs`) (+ `?lines=...`)
+  - `GET /logs/mqtt` (Supervisor `/addons/<mosquitto_slug>/logs`, default `core_mosquitto`) (+ `?lines=...`)
   - `GET /logs/z2m` (Supervisor `/addons/<z2m_slug>/logs`, domyślnie `45df7312_zigbee2mqtt`) (+ `?lines=...`)
     - Domyślnie zwraca ostatnie 1000 linii bez `debug:` (nadpobiera i filtruje).
     - Dodaj `?include_debug=true`, aby dostać surowe `debug:`.
